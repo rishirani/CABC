@@ -1,0 +1,44 @@
+7x7 Grid Sensitivity Analysis (SO and UE)
+=========================================================
+
+Capacities:
+  Interior columns capacity: 100.0
+  Left/right boundary columns capacity: 1000.0
+  rho_bar constraint applies to all nodes, including source and sink
+
+K-sweep
+-------
+Demand fixed at 10.0, rho_bar fixed at 0.99
+
+SO-CABC
+-------
+K = 0.0: runtime = 0.021377s, objective = 0.510026, status = optimal
+K = 1.0: runtime = 0.075380s, objective = 49.539096, status = optimal
+K = 2.0: runtime = 0.070360s, objective = 98.552011, status = optimal
+K = 3.0: runtime = 0.076341s, objective = 147.561812, status = optimal
+
+UE-CABC
+-------
+K = 0.0: runtime = 0.012044s, objective = 0.510009, status = optimal
+K = 1.0: runtime = 0.074555s, objective = 0.529446, status = optimal
+K = 2.0: runtime = 0.044340s, objective = 0.538915, status = optimal
+K = 3.0: runtime = 0.162519s, objective = 0.545845, status = optimal
+
+rho_bar-sweep
+-------------
+Demand fixed at 100.0, K fixed at 0.0
+
+SO-CABC
+-------
+rho_bar = 1.0: runtime = 0.172141s, objective = 5.101308, status = optimal
+rho_bar = 0.6: runtime = 0.012851s, objective = 5.180131, status = optimal
+rho_bar = 0.3: runtime = 0.018207s, objective = 5.259982, status = optimal
+rho_bar = 0.1: runtime = 0.013744s, objective = 5.430061, status = optimal
+
+UE-CABC
+-------
+rho_bar = 1.0: runtime = 0.011601s, objective = nan, status = optimal
+rho_bar = 0.6: runtime = 0.011306s, objective = 5.179997, status = optimal
+rho_bar = 0.3: runtime = 0.017118s, objective = 5.260011, status = optimal
+rho_bar = 0.1: runtime = 0.014717s, objective = 5.430001, status = optimal
+

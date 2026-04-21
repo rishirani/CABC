@@ -2,10 +2,11 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import networkx as nx
 import numpy as np
+import time
 from matplotlib.lines import Line2D
 
 from generate_network_logistical import generate_network_logistical
-from CABC_logistical import SO_CABC, UE_CABC
+from CABC_logistical import SO_CABC, UE_CABC, flow_betweenness_centrality
 
 
 # -----------------------------
@@ -16,6 +17,7 @@ row_figsize = 12
 col_figsize = 6
 plot_mk_sz = 8
 plot_node_ft = 4
+
 
 
 def main():
@@ -32,30 +34,64 @@ def main():
         "retailer": "^",
     }
 
-    # Layer → color mapping (topology plot)
-    layer_colors = {
-        "manufacturer": "firebrick",
-        "rd": "orange",
-        "ld": "gold",
-        "retailer": "steelblue",
-    }
+    # -----------------------------
+    # 2) Compute centralities + runtimes
+    # -----------------------------
+    def timed_compute(name, fn, *args, **kwargs):
+        print(f"Computing {name}...")
+        t0 = time.perf_counter()
+        result = fn(*args, **kwargs)
+        elapsed = time.perf_counter() - t0
+        print(f"{name} done in {elapsed:.6f}s.")
+        return result, elapsed
 
-    # -----------------------------
-    # 2) Compute centralities
-    # -----------------------------
+    centrality_times = {}
+
+    degree_cent, elapsed = timed_compute("Degree centrality", nx.degree_centrality, G)
+    centrality_times["Degree"] = elapsed
+
+    bet_cent, elapsed = timed_compute("Betweenness centrality", nx.betweenness_centrality, G)
+    centrality_times["Betweenness"] = elapsed
+
+    close_cent, elapsed = timed_compute("Closeness centrality", nx.closeness_centrality, G)
+    centrality_times["Closeness"] = elapsed
+
+    flow_bet_cent, elapsed = timed_compute(
+        "Flow Betweenness centrality",
+        flow_betweenness_centrality,
+        G,
+        progress=True,
+        print_every=25,
+    )
+    centrality_times["Flow_Betweenness"] = elapsed
+
     centralities = {
-        "Degree": nx.degree_centrality(G),
-        "Betweenness": nx.betweenness_centrality(G),
-        "Closeness": nx.closeness_centrality(G),
-        "Harmonic": nx.harmonic_centrality(G),
+        "Degree": degree_cent,
+        "Betweenness": bet_cent,
+        "Closeness": close_cent,
+        "Flow_Betweenness": flow_bet_cent,
     }
 
-    # CABC centralities
+    print("Computing SO-CABC centrality...")
+    t0_so = time.perf_counter()
     so_node_flow, so_flow_edges, so_total_cost = SO_CABC(G)
+    so_elapsed = time.perf_counter() - t0_so
+    centrality_times["SO_CABC"] = so_elapsed
+    print(f"SO-CABC done in {so_elapsed:.6f}s. Total cost = {so_total_cost:.6f}")
+
+    print("Computing UE-CABC centrality...")
+    t0_ue = time.perf_counter()
     ue_node_flow, ue_flow_edges, ue_total_cost = UE_CABC(G)
+    ue_elapsed = time.perf_counter() - t0_ue
+    centrality_times["UE_CABC"] = ue_elapsed
+    print(f"UE-CABC done in {ue_elapsed:.6f}s. Total cost = {ue_total_cost:.6f}")
 
     centralities["SO_CABC"] = so_node_flow
     centralities["UE_CABC"] = ue_node_flow
+
+    print("\n=== Centrality Compute Times ===")
+    for name in ["Degree", "Closeness", "Betweenness", "Flow_Betweenness", "SO_CABC", "UE_CABC"]:
+        print(f"{name:20s}: {centrality_times[name]:.6f} s")
 
     # Normalize to [0,1]
     for name, cent in centralities.items():
@@ -91,7 +127,6 @@ def main():
         for layer, shape in layer_shapes.items()
     ]
 
-
     # -----------------------------
     # 4) Topology plot (region-colored + two legends)
     # -----------------------------
@@ -99,7 +134,6 @@ def main():
 
     region_colors = {"W": "tab:blue", "C": "tab:orange", "E": "tab:green"}
 
-    # nodes: shape = layer, color = region
     for layer, shape in layer_shapes.items():
         for reg, col in region_colors.items():
             nodes = [n for n, d in G.nodes(data=True)
@@ -117,11 +151,9 @@ def main():
     nx.draw_networkx_edges(G, pos, ax=ax, alpha=0.5)
     nx.draw_networkx_labels(G, pos, font_size=plot_node_ft, ax=ax)
 
-    # Legend 1: node type (shapes)
     leg1 = ax.legend(handles=legend_elements_centrality, loc="upper left", title="Node Type")
     ax.add_artist(leg1)
 
-    # Legend 2: region (colors)
     region_legend = [
         Line2D([0], [0], marker='o', color='w', label='West',
             markerfacecolor=region_colors["W"], markersize=plot_mk_sz),
@@ -135,6 +167,7 @@ def main():
     ax.set_title("Regional Logistics Network")
     ax.axis("off")
 
+    print("Saving logistical_topology.png ...")
     plt.savefig("logistical_topology.png", dpi=300, bbox_inches="tight")
     plt.close(fig)
 
@@ -171,7 +204,9 @@ def main():
         ax.axis("off")
         ax.legend(handles=legend_elements_centrality, loc="lower right", title="Node Type")
 
-        plt.savefig(f"{name}_centrality_logistical.png", dpi=300, bbox_inches="tight")
+        outfile = f"{name}_centrality_logistical.png"
+        print(f"Saving {outfile} ...")
+        plt.savefig(outfile, dpi=300, bbox_inches="tight")
         plt.close(fig)
 
     # -----------------------------
@@ -179,9 +214,9 @@ def main():
     # -----------------------------
     ordered_names = [
         "Degree",
-        "Betweenness",
         "Closeness",
-        "Harmonic",
+        "Betweenness",
+        "Flow_Betweenness",
         "SO_CABC",
         "UE_CABC",
     ]
@@ -190,9 +225,9 @@ def main():
         "Degree": "Degree Centrality",
         "Betweenness": "Betweenness Centrality",
         "Closeness": "Closeness Centrality",
-        "Harmonic": "Harmonic Centrality",
-        "SO_CABC": "System-Optimal Congestion Adaptive Betweenness Centrality",
-        "UE_CABC": "User-Equilibrium Congestion Adaptive Betweenness Centrality",
+        "Flow_Betweenness": "Flow Betweenness Centrality",
+        "SO_CABC": "System-Optimal Congestion Adaptive Betweenness Centrality (SO-CABC)",
+        "UE_CABC": "User-Equilibrium Congestion Adaptive Betweenness Centrality (UE-CABC)",
     }
 
     fig, axes = plt.subplots(
@@ -226,7 +261,8 @@ def main():
 
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(0, 1))
         sm.set_array([])
-        fig.colorbar(sm, ax=ax, fraction=0.046, pad=0.04)
+        cbar = fig.colorbar(sm, ax=ax, fraction=0.046, pad=0.04)
+        cbar.set_label(f"{name} (norm.)")
 
         ax.set_title(pretty_titles[name])
         ax.axis("off")
@@ -235,8 +271,20 @@ def main():
     fig.suptitle("Logistical Network Centralities", fontsize=16)
     fig.tight_layout()
 
+    print("Saving all_logistical_centralities.png ...")
     fig.savefig("all_logistical_centralities.png", dpi=300, bbox_inches="tight")
     plt.close(fig)
+
+    # -----------------------------
+    # 7) Save timing results
+    # -----------------------------
+    with open("centrality_compute_times_logistical.txt", "w") as f:
+        f.write("Centrality Compute Times (seconds)\n")
+        f.write("----------------------------------\n")
+        for name in ["Degree", "Closeness", "Betweenness", "Flow_Betweenness", "SO_CABC", "UE_CABC"]:
+            f.write(f"{name}: {centrality_times[name]:.6f}\n")
+
+    print("Saving centrality_compute_times_logistical.txt ...")
 
 
 if __name__ == "__main__":

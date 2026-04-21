@@ -2,10 +2,11 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import networkx as nx
 import numpy as np
+import time
 from matplotlib.lines import Line2D
 
 from generate_network_abilene import generate_graph  # imports function to generate graph
-from CABC_abilene import SO_CABC, UE_CABC
+from CABC_abilene import SO_CABC, UE_CABC, flow_betweenness_centrality
 
 node_sz = 50
 row_figsize = 12
@@ -38,22 +39,66 @@ def main():
     }
 
     # -----------------------------
-    # 2) Compute centralities
+    # 2) Compute centralities + runtimes
     # -----------------------------
+    def timed_compute(name, fn, *args, **kwargs):
+        print(f"Computing {name}...")
+        t0 = time.perf_counter()
+        result = fn(*args, **kwargs)
+        elapsed = time.perf_counter() - t0
+        print(f"{name} done in {elapsed:.6f}s.")
+        return result, elapsed
+
+    centrality_times = {}
+
+    degree_cent, elapsed = timed_compute("Degree centrality", nx.degree_centrality, G)
+    centrality_times["Degree"] = elapsed
+
+    bet_cent, elapsed = timed_compute("Betweenness centrality", nx.betweenness_centrality, G)
+    centrality_times["Betweenness"] = elapsed
+
+    close_cent, elapsed = timed_compute("Closeness centrality", nx.closeness_centrality, G)
+    centrality_times["Closeness"] = elapsed
+
+    flow_bet_cent, elapsed = timed_compute(
+        "Flow Betweenness centrality",
+        flow_betweenness_centrality,
+        G,
+        progress=True,
+        print_every=25
+    )
+    centrality_times["Flow_Betweenness"] = elapsed
+
     centralities = {
-        "Degree": nx.degree_centrality(G),
-        "Betweenness": nx.betweenness_centrality(G),
-        "Closeness": nx.closeness_centrality(G),
-        "Harmonic": nx.harmonic_centrality(G),
+        "Degree": degree_cent,
+        "Betweenness": bet_cent,
+        "Closeness": close_cent,
+        "Flow_Betweenness": flow_bet_cent,
     }
 
     # CABC centralities
+    print("Computing SO-CABC centrality...")
+    t0_so = time.perf_counter()
     so_node_flow, so_flow_edges, so_total_cost = SO_CABC(G, client_rate_mbps=50.0)
+    so_elapsed = time.perf_counter() - t0_so
+    centrality_times["SO_CABC"] = so_elapsed
+    print(f"SO-CABC done in {so_elapsed:.6f}s. Total cost = {so_total_cost:.6f}")
+
+    print("Computing UE-CABC centrality...")
+    t0_ue = time.perf_counter()
     ue_node_flow, ue_flow_edges, ue_total_cost = UE_CABC(G, client_rate_mbps=50.0)
+    ue_elapsed = time.perf_counter() - t0_ue
+    centrality_times["UE_CABC"] = ue_elapsed
+    print(f"UE-CABC done in {ue_elapsed:.6f}s. Total cost = {ue_total_cost:.6f}")
 
     # Add SO_CABC and UE_CABC node centralities (will normalize below)
     centralities["SO_CABC"] = so_node_flow
     centralities["UE_CABC"] = ue_node_flow
+
+    # Print summary table
+    print("\n=== Centrality Compute Times ===")
+    for name in ["Degree", "Closeness", "Betweenness", "Flow_Betweenness", "SO_CABC", "UE_CABC"]:
+        print(f"{name:20s}: {centrality_times[name]:.6f} s")
 
     # Normalize all centralities to [0,1]
     for name, cent in centralities.items():
@@ -112,6 +157,7 @@ def main():
     ax.set_title("The Abilene Internet Topology")
     ax.axis('off')
     ax.legend(handles=legend_elements_topology, loc='lower right', title="Node Type")
+    print("Saving topology.png ...")
     plt.savefig("topology.png", dpi=300, bbox_inches="tight")
     plt.close(fig)
 
@@ -141,22 +187,24 @@ def main():
         ax.set_title(f"{name} Centrality")
         ax.axis('off')
         ax.legend(handles=legend_elements_centrality, loc='lower right', title="Node Type")
-        plt.savefig(f"{name}_centrality.png", dpi=300, bbox_inches="tight")
+        outfile = f"{name}_centrality.png"
+        print(f"Saving {outfile} ...")
+        plt.savefig(outfile, dpi=300, bbox_inches="tight")
         plt.close(fig)
 
         # -----------------------------
     # 4) Combined subplot figure (2x3) with
-    #    Degree, Betweenness, Closeness, Harmonic, SO_CABC, UE_CABC
+    #    Degree, Closeness, Betweenness, Flow_Betweenness, SO_CABC, UE_CABC
     # -----------------------------
-    ordered_names = ["Degree", "Betweenness", "Closeness",
-                     "Harmonic", "SO_CABC", "UE_CABC"]
+    ordered_names = ["Degree", "Closeness", "Betweenness",
+                     "Flow_Betweenness", "SO_CABC", "UE_CABC"]
     
     # Pretty titles for display
     pretty_titles = {
         "Degree": "Degree Centrality",
         "Betweenness": "Betweenness Centrality",
         "Closeness": "Closeness Centrality",
-        "Harmonic": "Harmonic Centrality",
+        "Flow_Betweenness": "Flow Betweenness Centrality",
         "SO_CABC": "System-Optimal Congestion Adaptive Betweenness Centrality (SO-CABC)",
         "UE_CABC": "User-Equilibrium Congestion Adaptive Betweenness Centrality (UE-CABC)",
     }
@@ -206,8 +254,20 @@ def main():
     fig.legend(handles=legend_elements_centrality, loc="lower right", title="Node Type")
     fig.suptitle("Abilene Internet Centralities", fontsize=16)
     fig.tight_layout()
+    print("Saving all_centralities_with_CABC.png ...")
     fig.savefig("all_centralities_with_CABC.png", dpi=300, bbox_inches="tight")
     plt.close(fig)
+
+    # -----------------------------
+    # 5) Save timing results
+    # -----------------------------
+    with open("centrality_compute_times.txt", "w") as f:
+        f.write("Centrality Compute Times (seconds)\n")
+        f.write("----------------------------------\n")
+        for name in ["Degree", "Closeness", "Betweenness", "Flow_Betweenness", "SO_CABC", "UE_CABC"]:
+            f.write(f"{name}: {centrality_times[name]:.6f}\n")
+
+    print("Saving centrality_compute_times.txt ...")
 
 
 if __name__ == "__main__":

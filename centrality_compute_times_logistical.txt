@@ -1,0 +1,8 @@
+Centrality Compute Times (seconds)
+----------------------------------
+Degree: 0.000184
+Closeness: 0.001505
+Betweenness: 0.001811
+Flow_Betweenness: 12.926730
+SO_CABC: 0.012921
+UE_CABC: 0.008705

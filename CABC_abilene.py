@@ -88,30 +88,27 @@ def SO_CABC(G, client_rate_mbps=50.0, verbose=False, solver=cp.ECOS):
     System-Optimal CABC:
         sum_i [ rho_i + K * rho_i^2/(1 - rho_i) ]
 
-    DCP-safe implementation:
-      - Vectorize constraints (A@f == b, rho bounds)
-      - Objective uses quad_over_lin per node because denom must be scalar in CVXPY.
-    """
-    eps = 1e-6
+    Algebraically equivalent vectorized form:
+        rho + K * rho^2/(1-rho)
+      = K * inv_pos(1-rho) + (1-K) * rho - K
 
+    The additive constant -K does not affect the optimizer, so we solve the
+    fully vectorized objective
+        sum_i [ K * inv_pos(1-rho_i) + (1-K) * rho_i ]
+    which is much lighter for CVXPY than a per-node quad_over_lin loop.
+    """
     f, edges, nodes, Pin, Pout, A, b, mu = _build_flow_mats(G, client_rate_mbps)
 
-    # Vector flow balance
     constraints = [A @ f - b == 0]
 
-    lam = Pin @ f                      # inflow vector (N,)
-    rho = cp.multiply(1.0 / mu, lam)   # utilization vector (N,)
+    lam = Pin @ f
+    rho = cp.multiply(1.0 / mu, lam)
 
-    # Domain: 0 <= rho <= 1-eps
     constraints += [rho >= 0, rho <= rho_max]
 
-    # DCP-safe objective: sum_i rho_i + K * quad_over_lin(rho_i, 1-rho_i)
-    # Need scalar denom -> per-component loop (cheap: N ~ 171 for Abilene build)
-    obj_terms = []
-    for i in range(len(nodes)):
-        obj_terms.append(rho[i] + K_CABC * cp.quad_over_lin(rho[i], 1 - rho[i]))
+    term = K_CABC * cp.inv_pos(1 - rho) + (1.0 - K_CABC) * rho
 
-    prob = cp.Problem(cp.Minimize(cp.sum(obj_terms)), constraints)
+    prob = cp.Problem(cp.Minimize(cp.sum(term)), constraints)
     prob.solve(solver=solver, verbose=verbose)
 
     if prob.status not in ("optimal", "optimal_inaccurate"):
@@ -164,3 +161,118 @@ def UE_CABC(G, client_rate_mbps=50.0, verbose=False, solver=cp.ECOS):
     node_flow = {n: float(node_flow_vec[i]) for i, n in enumerate(nodes)}
 
     return node_flow, edge_flow, float(prob.value)
+
+
+import time
+import math
+import networkx as nx
+
+
+def _build_node_split_digraph(G):
+    """Build a directed node-split graph for node-capacitated max-flow."""
+    H = nx.DiGraph()
+    big_cap = 0.0
+
+    for v, data in G.nodes(data=True):
+        cap_v = float(data.get("capacity", 1.0))
+        if cap_v <= 0:
+            raise ValueError(f"Node {v} has non-positive capacity {cap_v}.")
+        big_cap += cap_v
+        H.add_node((v, "in"))
+        H.add_node((v, "out"))
+        H.add_edge((v, "in"), (v, "out"), capacity=cap_v)
+
+    # Safe large source/sink edge capacity
+    big_cap = max(big_cap, 1.0)
+
+    for u, v in G.edges():
+        H.add_edge((u, "out"), (v, "in"), capacity=big_cap)
+        H.add_edge((v, "out"), (u, "in"), capacity=big_cap)
+
+    return H, big_cap
+
+
+
+def flow_betweenness_centrality(
+    G,
+    normalized=False,
+    flow_func=nx.algorithms.flow.preflow_push,
+    progress=True,
+    print_every=25,
+):
+    """
+    Exact full all-pairs node-capacitated flow betweenness.
+
+    This keeps a single persistent node-split graph in memory and only
+    adds/removes the two pair-specific source/sink edges per solve.
+    """
+    nodes = list(G.nodes())
+    centrality = {v: 0.0 for v in nodes}
+
+    H, big_cap = _build_node_split_digraph(G)
+    src = ("__super_source__",)
+    snk = ("__super_sink__",)
+    H.add_node(src)
+    H.add_node(snk)
+
+    total_pairs = len(nodes) * (len(nodes) - 1) // 2
+    if progress:
+        print(f"[Flow Betweenness] Starting exact all-pairs computation on {len(nodes)} nodes.")
+        print(f"[Flow Betweenness] Total source-target pairs: {total_pairs}")
+        t0 = time.time()
+    else:
+        t0 = None
+
+    idx = 0
+    for i, s in enumerate(nodes):
+        s_in = (s, "in")
+        for j in range(i + 1, len(nodes)):
+            t = nodes[j]
+            t_out = (t, "out")
+            idx += 1
+
+            H.add_edge(src, s_in, capacity=big_cap)
+            H.add_edge(t_out, snk, capacity=big_cap)
+
+            try:
+                max_flow_value, flow_dict = nx.maximum_flow(
+                    H, src, snk, capacity="capacity", flow_func=flow_func
+                )
+            except nx.NetworkXUnbounded:
+                max_flow_value = 0.0
+                flow_dict = {}
+            finally:
+                if H.has_edge(src, s_in):
+                    H.remove_edge(src, s_in)
+                if H.has_edge(t_out, snk):
+                    H.remove_edge(t_out, snk)
+
+            if max_flow_value > 1e-12:
+                inv_flow = 1.0 / float(max_flow_value)
+                for v in nodes:
+                    if v == s or v == t:
+                        continue
+                    transit_flow = flow_dict.get((v, "in"), {}).get((v, "out"), 0.0)
+                    centrality[v] += float(transit_flow) * inv_flow
+
+            if progress and (idx == 1 or idx % print_every == 0 or idx == total_pairs):
+                elapsed = time.time() - t0
+                avg = elapsed / idx
+                remaining = total_pairs - idx
+                eta = remaining * avg
+                pct = 100.0 * idx / total_pairs
+                print(
+                    f"[Flow Betweenness] {idx}/{total_pairs} pairs "
+                    f"({pct:.1f}%) | elapsed {elapsed:.1f}s | "
+                    f"avg/pair {avg:.3f}s | ETA {eta:.1f}s"
+                )
+
+    if normalized and total_pairs > 0:
+        scale = 1.0 / total_pairs
+        centrality = {v: scale * score for v, score in centrality.items()}
+
+    if progress:
+        total_elapsed = time.time() - t0
+        print(f"[Flow Betweenness] Done in {total_elapsed:.1f}s")
+
+    return centrality
