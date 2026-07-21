@@ -8,19 +8,19 @@ rho_bar: 0.99
 
 Linear Routing
 --------------
-Demand  10: runtime = 0.012483s, objective = 0.519999, status = optimal
-Demand  50: runtime = 0.007682s, objective = 2.600024, status = optimal
-Demand 100: runtime = 0.006377s, objective = 5.220018, status = optimal
+Demand  10: runtime = 0.015074s, objective = 0.519999, status = optimal
+Demand  50: runtime = 0.008531s, objective = 2.600024, status = optimal
+Demand 100: runtime = 0.006720s, objective = 5.220018, status = optimal
 
 SO-CABC
 -------
-Demand  10: runtime = 0.014354s, objective = 49.575963, status = optimal
-Demand  50: runtime = 0.014716s, objective = 52.776838, status = optimal
-Demand 100: runtime = 0.019788s, objective = 58.313323, status = optimal
+Demand  10: runtime = 0.012458s, objective = 49.575963, status = optimal
+Demand  50: runtime = 0.014016s, objective = 52.776838, status = optimal
+Demand 100: runtime = 0.020753s, objective = 58.313323, status = optimal
 
 UE-CABC
 -------
-Demand  10: runtime = 0.016669s, objective = 0.547005, status = optimal
-Demand  50: runtime = 0.020458s, objective = 3.350246, status = optimal
-Demand 100: runtime = 0.022171s, objective = 7.707758, status = optimal
+Demand  10: runtime = 0.018637s, objective = 0.547005, status = optimal
+Demand  50: runtime = 0.021815s, objective = 3.350246, status = optimal
+Demand 100: runtime = 0.022580s, objective = 7.707758, status = optimal
 

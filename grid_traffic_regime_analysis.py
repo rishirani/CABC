@@ -157,8 +157,10 @@ def solve_routing_centrality(
     inflow = Pin @ f_opt
     outflow = Pout @ f_opt
 
-    # Internal/transit importance proxy used in your other scripts.
-    node_flow_vec = 0.5 * (inflow + outflow)
+    # Node traffic proxy. Use the larger of inflow/outflow so transit nodes
+    # keep their through-flow value, while pure source/sink nodes are not
+    # unfairly halved by averaging one nonzero side with one zero side.
+    node_flow_vec = np.maximum(inflow, outflow)
     node_flow = {n: float(node_flow_vec[i]) for i, n in enumerate(nodes)}
 
     edge_flow = {edges[i]: float(f_opt[i]) for i in range(len(edges))}
